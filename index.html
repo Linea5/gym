@@ -40,37 +40,18 @@ const getEndpoint = () => localStorage.getItem(URL_KEY) || '';
 const setEndpoint = (url) => localStorage.setItem(URL_KEY, url);
 
 // =============================================================
-// API — talks to Apps Script
+// API — talks to Apps Script via direct CORS fetch
 // =============================================================
 async function apiReadHistory() {
   const url = getEndpoint();
   if (!url) throw new Error('Endpoint URL nie je nastavené.');
 
-  // JSONP-style: load via <script> tag to bypass CORS for reads
-  return new Promise((resolve, reject) => {
-    const cbName = 'gymCb' + Date.now();
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error('Timeout — Sheet neodpovedá. Skontroluj endpoint URL.'));
-    }, 15000);
-
-    function cleanup() {
-      clearTimeout(timeout);
-      delete window[cbName];
-      if (script.parentNode) script.parentNode.removeChild(script);
-    }
-
-    window[cbName] = (data) => {
-      cleanup();
-      if (data && data.error) reject(new Error(data.error));
-      else resolve(data);
-    };
-
-    const script = document.createElement('script');
-    script.src = url + (url.includes('?') ? '&' : '?') + 'action=history&callback=' + cbName + '&t=' + Date.now();
-    script.onerror = () => { cleanup(); reject(new Error('Nepodarilo sa pripojiť na Sheet.')); };
-    document.body.appendChild(script);
-  });
+  const fullUrl = url + (url.includes('?') ? '&' : '?') + 'action=history&t=' + Date.now();
+  const res = await fetch(fullUrl, { method: 'GET', redirect: 'follow' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  if (data && data.error) throw new Error(data.error);
+  return data;
 }
 
 async function apiWriteSession(payload) {
