@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#000000" />
+  <title>Ronaldov tréning</title>
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23000'/%3E%3Ctext x='50' y='62' font-family='Georgia' font-size='44' fill='white' text-anchor='middle'%3ER%3C/text%3E%3C/svg%3E" />
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; padding: 0; background: #000; color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+      overscroll-behavior-y: none; }
+    #root { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+    input, textarea { font-family: inherit; }
+    input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type="number"] { -moz-appearance: textfield; }
+    button { font-family: inherit; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #444;
+      border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  </style>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="env,react">
+const { useState, useEffect, useMemo, useCallback } = React;
+
+// =============================================================
+// CONFIG — store Apps Script URL in localStorage
+// =============================================================
+const URL_KEY = 'gym-endpoint-url';
+const getEndpoint = () => localStorage.getItem(URL_KEY) || '';
+const setEndpoint = (url) => localStorage.setItem(URL_KEY, url);
+
+// =============================================================
+// API — talks to Apps Script
+// =============================================================
+async function apiReadHistory() {
+  const url = getEndpoint();
+  if (!url) throw new Error('Endpoint URL nie je nastavené.');
+
+  // JSONP-style: load via <script> tag to bypass CORS for reads
+  return new Promise((resolve, reject) => {
+    const cbName = 'gymCb' + Date.now();
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('Timeout — Sheet neodpovedá. Skontroluj endpoint URL.'));
+    }, 15000);
+
+    function cleanup() {
+      clearTimeout(timeout);
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    window[cbName] = (data) => {
+      cleanup();
+      if (data && data.error) reject(new Error(data.error));
+      else resolve(data);
+    };
+
+    const script = document.createElement('script');
+    script.src = url + (url.includes('?') ? '&' : '?') + 'action=history&callback=' + cbName + '&t=' + Date.now();
+    script.onerror = () => { cleanup(); reject(new Error('Nepodarilo sa pripojiť na Sheet.')); };
+    document.body.appendChild(script);
+  });
+}
+
+async function apiWriteSession(payload) {
+  const url = getEndpoint();
+  if (!url) throw new Error('Endpoint URL nie je nastavené.');
+
+  // POST with no-cors — we don't read the response, just fire and trust
+  await fetch(url, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload),
+  });
+  return { ok: true };
+}
+
+// =============================================================
+// DATA: TRAININGS (same as before)
+// =============================================================
+const TRAININGS = {
+  1: {
+    name: 'Tréning 1',
+    focus: 'Mobilita · Rotácia · Ramená',
+    blocks: [
+      { label: 'A — Mobilita & aktivácia (3 kolá)',
+        exercises: [
+          { id: '1A1', name: 'Quadratus / lat stretch', target: '3× 30s každá strana', tracked: false,
+            desc: 'Strečing bočného svalstva trupu a širokého chrbtového svalu. V kľaku, ruka hore, naťahuješ sa do strany.',
+            equipment: 'Bez náradia, na podlahe.',
+            video: 'https://www.youtube.com/results?search_query=quadratus+lumborum+lat+stretch' },
+          { id: '1A2', name: 'External hip rotation 90/90', target: '3× 8 každá strana', tracked: false,
+            desc: 'Sed na zemi, jedna noha pred tebou v 90°, druhá vedľa v 90°. Pohyb medzi pozíciami pre vonkajšiu rotáciu bedier.',
+            equipment: 'Bez náradia, na podlahe.',
+            video: 'https://www.youtube.com/results?search_query=90+90+hip+rotation+stretch' },
+          { id: '1A3', name: 'Podávanie predmetu za chrbtom', target: '3× 10 (5 každá strana)', tracked: false,
+            desc: 'Stojíš, predmet (ľahká kettlebell, lopta) si podávaš spoza chrbta z ruky do ruky. Rozhýbeš ramená a hrudník.',
+            equipment: 'Ľahká kettlebell, medicinbal alebo aj fľaša s vodou.',
+            video: 'https://www.youtube.com/results?search_query=behind+the+back+pass+kettlebell+shoulder+mobility' },
+        ] },
+      { label: 'B — Sila & rotácia (3 kolá)',
+        exercises: [
+          { id: '1B1', name: 'Výpad vzad', target: '3× 8', weight: '16–20 kg', tracked: true,
+            desc: 'Z postoja krok vzad do výpadu, predné koleno nad členok, zadné takmer k zemi. S jednoručkami v rukách alebo veľkou činkou na pleciach.',
+            equipment: 'Jednoručky alebo veľká činka.',
+            video: 'https://www.youtube.com/results?search_query=reverse+lunge+dumbbell' },
+          { id: '1B2', name: 'Rotácia na kladke', target: '3× 10–12', weight: '10 kg', tracked: true,
+            desc: 'Pri kladke v boku, držíš madlo oboma rukami pred telom, rotuješ trupom preč od kladky. Core a šikmé brucho.',
+            equipment: 'Kladka — nastav do výšky pása alebo pliec, rovné madlo alebo lano.',
+            video: 'https://www.youtube.com/results?search_query=cable+rotation+core+exercise' },
+          { id: '1B3', name: 'Príťah s rotáciou na kladke', target: '3× 8–10', weight: '15–20 kg', tracked: true,
+            desc: 'Príťah z kladky kombinovaný s rotáciou trupu. Začneš s natiahnutou rukou, priťahuješ a zároveň rotuješ trupom dovnútra.',
+            equipment: 'Kladka — nízka pozícia, jednoručné madlo.',
+            video: 'https://www.youtube.com/results?search_query=cable+row+with+rotation' },
+        ] },
+      { label: 'C — Ramená & core (3 kolá)',
+        exercises: [
+          { id: '1C1', name: 'Upažovanie nad hlavu + predpažovanie', target: '3× 10–12', tracked: true,
+            desc: 'Kombinovaný cvik: upažíš jednoručky nad hlavu, vrátiš dolu, potom predpažíš. Jeden plynulý pohyb. Ramená komplexne.',
+            equipment: 'Ľahké jednoručky (3–5 kg na začiatok, je to vyčerpávajúce).',
+            video: 'https://www.youtube.com/results?search_query=lateral+raise+to+front+raise+combo' },
+          { id: '1C2', name: 'Excentrický bridge, flow-in', target: '3× 8', tracked: true,
+            desc: 'Most (bridge) so spomaleným spúšťaním a plynulým prechodom. Glutes a zadná reťaz.',
+            equipment: 'Bez náradia alebo s činkou na bokoch.',
+            video: 'https://www.youtube.com/results?search_query=eccentric+glute+bridge+flow' },
+          { id: '1C3', name: 'Russian twist', target: '3× 20 (10 každá strana)', tracked: true,
+            desc: 'Sed na zemi, mierny záklon, nohy hore alebo na zemi. Rotuješ trupom zo strany na stranu, prípadne so závažím.',
+            equipment: 'Voliteľne medicinbal alebo kotúč.',
+            video: 'https://www.youtube.com/results?search_query=russian+twist+core' },
+        ] },
+      { label: 'D — Záver: ruky (2 kolá)',
+        exercises: [
+          { id: '1D1', name: 'Biceps na kladke — zhadzovačka', target: '3× 12–15', tracked: true,
+            desc: 'Biceps curl z hornej kladky. Zhadzovačka = drop-set: po únave znížiš váhu a pokračuješ.',
+            equipment: 'Horná kladka, rovné alebo EZ madlo.',
+            video: 'https://www.youtube.com/results?search_query=cable+bicep+curl+drop+set' },
+          { id: '1D2', name: 'Triceps na kladke — zhadzovačka', target: '3× 12–15', tracked: true,
+            desc: 'Triceps pushdown z hornej kladky, drop-set. Po únave znížiš váhu, pokračuješ.',
+            equipment: 'Horná kladka, lano alebo rovné madlo.',
+            video: 'https://www.youtube.com/results?search_query=cable+tricep+pushdown+drop+set' },
+        ] },
+    ],
+  },
+  2: {
+    name: 'Tréning 2',
+    focus: 'Sila · Unilaterálne · Tlaky',
+    blocks: [
+      { label: 'A — Mobilita & aktivácia (3 kolá)',
+        exercises: [
+          { id: '2A1', name: 'Quadratus / lat stretch', target: '3× 30s každá strana', tracked: false,
+            desc: 'To isté ako v T1.', equipment: 'Bez náradia.',
+            video: 'https://www.youtube.com/results?search_query=quadratus+lumborum+lat+stretch' },
+          { id: '2A2', name: 'External hip rotation 90/90', target: '3× 8 každá strana', tracked: false,
+            desc: 'To isté ako v T1.', equipment: 'Bez náradia.',
+            video: 'https://www.youtube.com/results?search_query=90+90+hip+rotation+stretch' },
+          { id: '2A3', name: 'Loptkový zdvih', target: '3× 10', tracked: false,
+            desc: 'Pravdepodobne dead bug s loptou alebo zdvih nôh s loptou medzi kolenami. Core aktivácia. Over s trénerom — menej štandardný názov.',
+            equipment: 'Veľká lopta (medicinbal alebo gym ball).',
+            video: 'https://www.youtube.com/results?search_query=dead+bug+with+ball' },
+        ] },
+      { label: 'B — Sila (3 kolá)',
+        exercises: [
+          { id: '2B1', name: 'Zhyb podhmatom', target: '3× 4–5', tracked: true,
+            desc: 'Klasický zhyb na hrazde podhmatom (dlane k sebe). Pauzovaný = zastav sa hore na 1 sekundu.',
+            equipment: 'Hrazda na zhyby.',
+            video: 'https://www.youtube.com/results?search_query=chin+up+underhand+grip' },
+          { id: '2B2', name: 'Bočný výstup na box', target: '3× 8', weight: '+10 kg', tracked: true,
+            desc: 'Postavíš sa bokom k boxu, vystúpiš naň jednou nohou, druhú zdvihneš. Strieda strany. S jednoručkami.',
+            equipment: 'Plyo box (cca 40–50 cm) + jednoručky 10 kg.',
+            video: 'https://www.youtube.com/results?search_query=lateral+box+step+up' },
+          { id: '2B3', name: 'Hip airplane', target: '3× 8 každá strana', tracked: true,
+            desc: 'Stojíš na jednej nohe, predklon, druhá noha vystretá vzad. Rotuješ panvou. Náročné na rovnováhu.',
+            equipment: 'Bez náradia, prípadne sa pridrž tyče.',
+            video: 'https://www.youtube.com/results?search_query=hip+airplane+exercise' },
+        ] },
+      { label: 'C — Hlavné páry (3 kolá)',
+        exercises: [
+          { id: '2C1', name: 'Rumunský mŕtvy ťah s jednoručkami', target: '3× 8–10', weight: '24 kg', tracked: true,
+            desc: 'Mierne pokrčené kolená, predklon s rovným chrbtom, jednoručky pozdĺž stehien k zemi a späť. Zadná reťaz.',
+            equipment: 'Jednoručky 24 kg každá.',
+            video: 'https://www.youtube.com/results?search_query=romanian+deadlift+dumbbell' },
+          { id: '2C2', name: 'Tlak s jednoručkami na lavičke', target: '3× 8', weight: '20–22 kg', tracked: true,
+            desc: 'Bench press s jednoručkami. Lavička rovná alebo mierne naklonená.',
+            equipment: 'Lavička + jednoručky 20–22 kg.',
+            video: 'https://www.youtube.com/results?search_query=dumbbell+bench+press' },
+        ] },
+      { label: 'D — Záver (3 kolá)',
+        exercises: [
+          { id: '2D1', name: 'Viking press', target: '3× 10–12', weight: '20 kg na stranu', tracked: true,
+            desc: 'Tlak nad hlavu s landmine tyčou — držíš jeden koniec tyče oboma rukami a tlačíš nahor.',
+            equipment: 'Landmine (tyč zapichnutá v rohu) + 20 kg kotúče.',
+            video: 'https://www.youtube.com/results?search_query=landmine+viking+press' },
+          { id: '2D2', name: 'Horizontálny príťah na stroji', target: '3× 12', weight: '45–50 kg', tracked: true,
+            desc: 'Sed na stroji (seated row), priťahuješ madlo k brušku.',
+            equipment: 'Stroj seated row alebo nízka kladka so sedením.',
+            video: 'https://www.youtube.com/results?search_query=seated+cable+row+machine' },
+          { id: '2D3', name: 'Lýtka v stoji jednonožne', target: '3× 12 každá noha', tracked: true,
+            desc: 'Výpony na jednej nohe na okraji stupienka.',
+            equipment: 'Stupienok alebo plyo box, voliteľne jednoručka.',
+            video: 'https://www.youtube.com/results?search_query=single+leg+calf+raise' },
+        ] },
+    ],
+  },
+  3: {
+    name: 'Tréning 3',
+    focus: 'Core stabilita · Tlaky · Glutes',
+    blocks: [
+      { label: 'A — Core stabilita (3 kolá)',
+        exercises: [
+          { id: '3A1', name: 'Bridge SL ISO (jednonožný most, izometria)', target: '3× 20s každá strana', tracked: false,
+            desc: 'Most na jednej nohe, druhá noha vystretá hore. Držíš v hornej polohe 20 sekúnd.',
+            equipment: 'Bez náradia.',
+            video: 'https://www.youtube.com/results?search_query=single+leg+glute+bridge+isometric+hold' },
+          { id: '3A2', name: 'Side plank + abdukcia', target: '3× 12 každá strana', tracked: false,
+            desc: 'Bočná doska, zdvíhaš hornú nohu. Bok a stredný gluteus.',
+            equipment: 'Bez náradia.',
+            video: 'https://www.youtube.com/results?search_query=side+plank+with+leg+abduction' },
+          { id: '3A3', name: 'Strieška', target: '3× 8', tracked: false,
+            desc: 'Pravdepodobne pike push-up — telo do tvaru obráteného V. Over s trénerom.',
+            equipment: 'Bez náradia.',
+            video: 'https://www.youtube.com/results?search_query=pike+push+up+exercise' },
+        ] },
+      { label: 'B — Tlaky (3 kolá)',
+        exercises: [
+          { id: '3B1', name: 'Pull over na lavičke s vyloženými nohami', target: '3× 10', weight: '14 kg', tracked: true,
+            desc: 'Ležíš na lavičke s nohami vyloženými na konci, držíš jednu jednoručku oboma rukami nad hrudníkom, spúšťaš za hlavu a vraciaš späť.',
+            equipment: 'Lavička + jednoručka 14 kg.',
+            video: 'https://www.youtube.com/results?search_query=dumbbell+pullover+bench' },
+          { id: '3B2', name: 'Tlak nad hlavu s veľkou činkou', target: '1× 10 @ 30 kg, 2× 6–8 @ 40 kg', tracked: true,
+            desc: 'Overhead press s veľkou činkou v stoji. POZOR: tyč 20 kg je súčasť celkovej váhy. 30 kg = tyč + 2× 5 kg.',
+            equipment: 'Veľká činka (tyč 20 kg) + kotúče.',
+            video: 'https://www.youtube.com/results?search_query=barbell+overhead+press' },
+        ] },
+      { label: 'C — Glutes & chrbát (3 kolá)',
+        exercises: [
+          { id: '3C1', name: 'Hip thrust', target: '3× 8–10', weight: '40–50 kg', tracked: true,
+            desc: 'Lopatky na lavičke, činka cez panvu. POZOR: tyč 20 kg je súčasť celkovej váhy. 40 kg = tyč + 2× 10 kg.',
+            equipment: 'Lavička + veľká činka + kotúče (a podložka pod činku).',
+            video: 'https://www.youtube.com/results?search_query=barbell+hip+thrust' },
+          { id: '3C2', name: 'Horizontálny príťah v medvedej pozícii o lavičku', target: '3× 10', weight: '20 kg', tracked: true,
+            desc: 'Single arm row v medveďej pozícii — opretý jednou rukou o lavičku. Anti-rotation.',
+            equipment: 'Lavička + jednoručka 20 kg.',
+            video: 'https://www.youtube.com/results?search_query=bear+position+single+arm+row' },
+        ] },
+      { label: 'D — Záver (3 kolá)',
+        exercises: [
+          { id: '3D1', name: 'Lateral lunge', target: '3× 12', weight: '16 kg', tracked: true,
+            desc: 'Bočný výpad — krok do strany, kolneš sa na jednu nohu, druhá vystretá.',
+            equipment: 'Jednoručky 16 kg.',
+            video: 'https://www.youtube.com/results?search_query=lateral+lunge+dumbbell' },
+          { id: '3D2', name: 'Rozpažky na kladke', target: '3× 12', weight: '10–12.5 kg', tracked: true,
+            desc: 'Cable fly — stojíš medzi dvomi kladkami, ruky priťahuješ pred telo do oblúka.',
+            equipment: 'Dve kladky oproti sebe (cable crossover).',
+            video: 'https://www.youtube.com/results?search_query=cable+chest+fly+crossover' },
+        ] },
+    ],
+  },
+};
+
+const ALL_EXERCISES = Object.values(TRAININGS).flatMap(t => t.blocks.flatMap(b => b.exercises));
+const findExercise = (id) => ALL_EXERCISES.find(e => e.id === id);
+
+const C = {
+  bg: '#000', card: '#0e0e0e', border: '#1a1a1a', borderStrong: '#2a2a2a',
+  muted: '#888', mutedDim: '#666', text: '#fff', textDim: '#ddd',
+  accent: '#fff', success: '#5fb85f', successBg: '#0a1a0a', successBorder: '#1f3f1f',
+  serif: 'Georgia, "Times New Roman", serif',
+};
+
+// =============================================================
+// COMPONENTS
+// =============================================================
+
+function Header({ onBack, title, subtitle }) {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      {onBack && (
+        <button onClick={onBack} style={{
+          background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 999,
+          padding: '8px 14px', color: C.text, cursor: 'pointer', display: 'flex',
+          alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 20,
+        }}>‹ Späť</button>
+      )}
+      {subtitle && <div style={{ fontSize: 12, color: C.muted, letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: 8 }}>{subtitle}</div>}
+      <h1 style={{ fontFamily: C.serif, fontSize: 32, fontWeight: 400, lineHeight: 1.15, margin: 0, letterSpacing: '-0.02em' }}>{title}</h1>
+    </div>
+  );
+}
+
+function SetupScreen({ onSaved }) {
+  const [url, setUrl] = useState(getEndpoint());
+  const [testing, setTesting] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSave = async () => {
+    if (!url.trim()) { setError('Vlož Apps Script URL.'); return; }
+    setEndpoint(url.trim());
+    setTesting(true);
+    setError('');
+    try {
+      await apiReadHistory();
+      onSaved();
+    } catch (e) {
+      setError('Test zlyhal: ' + e.message + ' — skontroluj URL a deployment.');
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: '32px 20px 100px' }}>
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontSize: 12, letterSpacing: '0.18em', textTransform: 'uppercase', color: C.muted, marginBottom: 10 }}>Prvotné nastavenie</div>
+        <h1 style={{ fontFamily: C.serif, fontSize: 36, fontWeight: 400, lineHeight: 1.1, margin: 0, letterSpacing: '-0.02em' }}>Pripoj sa<br/>na Google Sheet.</h1>
+      </div>
+
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, marginBottom: 16, fontSize: 14, lineHeight: 1.6, color: C.textDim }}>
+        Po nasadení Apps Script si dostal URL končiace na <code style={{ color: '#aaa', background: '#222', padding: '2px 6px', borderRadius: 4, fontSize: 12 }}>/exec</code>. Vlož ju sem.
+      </div>
+
+      <input type="url" value={url} onChange={e => setUrl(e.target.value)}
+        placeholder="https://script.google.com/macros/s/.../exec"
+        style={{ width: '100%', background: '#000', border: `1px solid ${C.borderStrong}`, borderRadius: 10,
+          padding: '12px 14px', color: C.text, fontSize: 14, marginBottom: 12 }} />
+
+      <button onClick={handleSave} disabled={testing} style={{
+        width: '100%', background: C.accent, border: 'none', borderRadius: 10,
+        padding: '14px', color: '#000', cursor: testing ? 'wait' : 'pointer',
+        fontSize: 14, fontWeight: 600, opacity: testing ? 0.6 : 1,
+      }}>{testing ? 'Testujem pripojenie…' : 'Uložiť & otestovať'}</button>
+
+      {error && <div style={{ marginTop: 14, color: '#ff6b6b', fontSize: 13, lineHeight: 1.5 }}>{error}</div>}
+    </div>
+  );
+}
+
+function HomeScreen({ onNav, sessions, loading, error, onRefresh }) {
+  const lastSession = sessions[0];
+  const counts = { 1: 0, 2: 0, 3: 0 };
+  sessions.forEach(s => {
+    const tNum = s.training === 'Tréning 1' ? 1 : s.training === 'Tréning 2' ? 2 : s.training === 'Tréning 3' ? 3 : null;
+    if (tNum) counts[tNum]++;
+  });
+
+  return (
+    <div style={{ padding: '32px 20px 100px' }}>
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ fontSize: 12, letterSpacing: '0.18em', textTransform: 'uppercase', color: C.muted, marginBottom: 10 }}>Tvoj tréner v telefóne</div>
+        <h1 style={{ fontFamily: C.serif, fontSize: 42, fontWeight: 400, lineHeight: 1.05, margin: 0, letterSpacing: '-0.025em' }}>Ronaldov<br/>tréning.</h1>
+        <div style={{ marginTop: 18, fontSize: 13, color: C.muted, display: 'flex', alignItems: 'center', gap: 8 }}>
+          {loading && <><span className="spinner"></span> Načítavam zo Sheetu…</>}
+          {!loading && lastSession && (
+            <span>Naposledy: <span style={{ color: C.text }}>{lastSession.training}</span> · {new Date(lastSession.date).toLocaleDateString('sk-SK', { day: 'numeric', month: 'long' })}</span>
+          )}
+          {!loading && !lastSession && !error && <span>Zatiaľ žiadne tréningy.</span>}
+          {error && <span style={{ color: '#ff8b8b' }}>⚠ {error} <button onClick={onRefresh} style={{ background: 'transparent', border: 'none', color: '#aaa', textDecoration: 'underline', cursor: 'pointer', padding: 0, marginLeft: 4 }}>obnoviť</button></span>}
+        </div>
+      </div>
+
+      <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 12 }}>Začni tréning</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 28 }}>
+        {[1, 2, 3].map(n => {
+          const t = TRAININGS[n];
+          return (
+            <button key={n} onClick={() => onNav({ screen: 'training', trainingId: n })}
+              style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14,
+                padding: '20px 18px', textAlign: 'left', cursor: 'pointer', color: C.text, width: '100%' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                <div style={{ fontSize: 11, letterSpacing: '0.15em', color: C.mutedDim, textTransform: 'uppercase' }}>{t.name}</div>
+                {counts[n] > 0 && (
+                  <div style={{ fontSize: 11, color: C.muted, background: '#1a1a1a', padding: '3px 9px', borderRadius: 999 }}>{counts[n]}×</div>
+                )}
+              </div>
+              <div style={{ fontFamily: C.serif, fontSize: 22, fontWeight: 400, marginBottom: 4 }}>{t.focus}</div>
+              <div style={{ fontSize: 12, color: C.mutedDim }}>{t.blocks.reduce((s, b) => s + b.exercises.length, 0)} cvikov · {t.blocks.length} blokov</div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 12 }}>Progres</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <button onClick={() => onNav({ screen: 'progress' })}
+          style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: '18px', textAlign: 'left', cursor: 'pointer', color: C.text, width: '100%' }}>
+          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>Analýza & grafy</div>
+          <div style={{ fontSize: 12, color: C.muted }}>Trendy váh, objem, čo ide a čo nie</div>
+        </button>
+        <button onClick={() => onNav({ screen: 'history' })}
+          style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: '18px', textAlign: 'left', cursor: 'pointer', color: C.text, width: '100%' }}>
+          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>História ({sessions.length})</div>
+          <div style={{ fontSize: 12, color: C.muted }}>Všetky odcvičené tréningy</div>
+        </button>
+        <button onClick={() => onNav({ screen: 'settings' })}
+          style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: '18px', textAlign: 'left', cursor: 'pointer', color: C.text, width: '100%' }}>
+          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>Nastavenia</div>
+          <div style={{ fontSize: 12, color: C.muted }}>Endpoint URL, refresh</div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ExerciseDetail({ exercise, onClose, history, onSave, currentEntry }) {
+  const seed = currentEntry?.sets ||
+    (history[0]?.sets ? history[0].sets.map(s => ({ weight: s.weight ?? '', reps: s.reps ?? '', done: false })) :
+      [{ weight: '', reps: '', done: false }, { weight: '', reps: '', done: false }, { weight: '', reps: '', done: false }]);
+
+  const [sets, setSets] = useState(seed);
+  const [notes, setNotes] = useState(currentEntry?.notes || '');
+
+  const update = (idx, field, val) => { const n = [...sets]; n[idx] = { ...n[idx], [field]: val }; setSets(n); };
+  const toggleDone = (idx) => { const n = [...sets]; n[idx] = { ...n[idx], done: !n[idx].done }; setSets(n); };
+  const addSet = () => setSets([...sets, { weight: '', reps: '', done: false }]);
+  const removeSet = (idx) => setSets(sets.filter((_, i) => i !== idx));
+
+  const handleSave = () => {
+    const cleaned = sets.filter(s => s.weight !== '' || s.reps !== '');
+    onSave({ sets: cleaned, notes });
+    onClose();
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: C.bg, overflowY: 'auto', zIndex: 100, WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ padding: '12px 20px 100px', maxWidth: 600, margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, background: C.bg, paddingTop: 12, paddingBottom: 14, marginBottom: 8, zIndex: 10 }}>
+          <button onClick={onClose} style={{ background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 999, padding: '8px 14px', color: C.text, cursor: 'pointer', fontSize: 13 }}>✕ Zavrieť</button>
+          <button onClick={handleSave} style={{ background: C.accent, border: 'none', borderRadius: 999, padding: '10px 18px', color: '#000', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Uložiť</button>
+        </div>
+
+        <div style={{ fontSize: 11, color: C.muted, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 6 }}>{exercise.id}</div>
+        <h2 style={{ fontFamily: C.serif, fontSize: 26, fontWeight: 400, lineHeight: 1.2, margin: '0 0 18px' }}>{exercise.name}</h2>
+
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 6 }}>Cieľ od trénera</div>
+          <div style={{ fontSize: 15 }}>{exercise.target}{exercise.weight ? ` · ${exercise.weight}` : ''}</div>
+        </div>
+
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 6 }}>Čo to je</div>
+          <div style={{ fontSize: 14, color: C.textDim, lineHeight: 1.55, marginBottom: 10 }}>{exercise.desc}</div>
+          <div style={{ fontSize: 13, color: C.muted, borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
+            <span style={{ color: '#aaa', fontWeight: 500 }}>Náradie: </span>{exercise.equipment}
+          </div>
+        </div>
+
+        <a href={exercise.video} target="_blank" rel="noopener noreferrer" style={{
+          display: 'flex', alignItems: 'center', gap: 12, background: '#1a1a1a',
+          border: `1px solid ${C.borderStrong}`, borderRadius: 12, padding: '12px 16px',
+          textDecoration: 'none', color: C.text, marginBottom: 20,
+        }}>
+          <div style={{ background: C.accent, color: '#000', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700 }}>▶</div>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 500 }}>Pozri ukážku na YouTube</div>
+            <div style={{ fontSize: 12, color: C.muted }}>Otvorí sa v novom okne</div>
+          </div>
+        </a>
+
+        {history.length > 0 && (
+          <div style={{ background: '#0a0a0a', border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 18 }}>
+            <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>Posledných {Math.min(3, history.length)} tréningov</div>
+            {history.slice(0, 3).map((h, i) => (
+              <div key={i} style={{ fontSize: 13, color: C.textDim, paddingTop: i > 0 ? 8 : 0, marginTop: i > 0 ? 8 : 0, borderTop: i > 0 ? `1px solid ${C.border}` : 'none' }}>
+                <span style={{ color: C.muted }}>{new Date(h.date).toLocaleDateString('sk-SK', { day: 'numeric', month: 'short' })}: </span>
+                {h.sets.map((s, j) => (
+                  <span key={j}>{s.weight ? `${s.weight}×${s.reps || '?'}` : `${s.reps || '?'} reps`}{j < h.sets.length - 1 ? ', ' : ''}</span>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {exercise.tracked !== false ? (
+          <>
+            <div style={{ marginBottom: 10, fontSize: 12, color: C.muted, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Dnešné série</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {sets.map((set, idx) => (
+                <div key={idx} style={{
+                  display: 'flex', gap: 8, alignItems: 'center',
+                  background: set.done ? C.successBg : C.card,
+                  border: `1px solid ${set.done ? C.successBorder : C.border}`,
+                  borderRadius: 12, padding: '12px 12px',
+                }}>
+                  <div style={{ fontSize: 12, color: C.mutedDim, width: 22, fontWeight: 500 }}>{idx + 1}.</div>
+                  <div style={{ flex: 1, display: 'flex', gap: 6 }}>
+                    <input type="number" inputMode="decimal" placeholder="kg" value={set.weight}
+                      onChange={e => update(idx, 'weight', e.target.value)}
+                      style={{ flex: 1, background: '#000', border: `1px solid ${C.borderStrong}`, borderRadius: 8, padding: '10px 10px', color: C.text, fontSize: 16, minWidth: 0 }} />
+                    <div style={{ color: '#444', alignSelf: 'center', fontSize: 14 }}>×</div>
+                    <input type="number" inputMode="numeric" placeholder="reps" value={set.reps}
+                      onChange={e => update(idx, 'reps', e.target.value)}
+                      style={{ flex: 1, background: '#000', border: `1px solid ${C.borderStrong}`, borderRadius: 8, padding: '10px 10px', color: C.text, fontSize: 16, minWidth: 0 }} />
+                  </div>
+                  <button onClick={() => toggleDone(idx)} style={{
+                    background: set.done ? '#2a5a2a' : 'transparent', border: `1px solid ${set.done ? '#2a5a2a' : '#333'}`,
+                    borderRadius: 999, width: 34, height: 34, cursor: 'pointer', color: C.text, flexShrink: 0,
+                    fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>✓</button>
+                  {sets.length > 1 && (
+                    <button onClick={() => removeSet(idx)} style={{
+                      background: 'transparent', border: 'none', cursor: 'pointer', color: C.mutedDim,
+                      width: 24, height: 34, fontSize: 18, padding: 0, flexShrink: 0,
+                    }}>×</button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button onClick={addSet} style={{
+              marginTop: 10, background: 'transparent', border: `1px dashed ${C.borderStrong}`,
+              borderRadius: 12, padding: '11px', color: C.muted, cursor: 'pointer', width: '100%', fontSize: 13,
+            }}>+ Pridať sériu</button>
+          </>
+        ) : (
+          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>Mobilita / aktivácia — nezapisujeme váhy.</div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 12, color: C.muted, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>Poznámka</div>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)}
+            placeholder="napr. ľavé rameno tlačí, prešiel som z 22 na 24 kg"
+            style={{ width: '100%', background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 12, color: C.text, fontSize: 14, fontFamily: 'inherit', minHeight: 60, resize: 'vertical' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TrainingScreen({ trainingId, onBack, sessions, onSaveExercise, syncing }) {
+  const training = TRAININGS[trainingId];
+  const [openExerciseId, setOpenExerciseId] = useState(null);
+  const [todayDraft, setTodayDraft] = useState({}); // entries built up for today's session
+
+  const todayStr = new Date().toDateString();
+  const todaySession = sessions.find(s => s.training === training.name && new Date(s.date).toDateString() === todayStr);
+
+  // Build current state for this exercise: prefer in-memory draft, fall back to today's session from Sheet
+  const getCurrent = (exId) => {
+    if (todayDraft[exId]) return todayDraft[exId];
+    if (todaySession) {
+      const sets = todaySession.sets.filter(s => s.exerciseId === exId);
+      if (sets.length) {
+        return {
+          sets: sets.sort((a, b) => a.setNum - b.setNum).map(s => ({ weight: s.weight ?? '', reps: s.reps ?? '', done: false })),
+          notes: sets[0]?.notes || '',
+        };
+      }
+    }
+    return null;
+  };
+
+  // History across sessions for this exercise (newest first, excluding today)
+  const getHistory = (exId) => {
+    return sessions
+      .filter(s => new Date(s.date).toDateString() !== todayStr)
+      .map(s => {
+        const sets = s.sets.filter(set => set.exerciseId === exId).sort((a, b) => a.setNum - b.setNum);
+        if (!sets.length) return null;
+        return { date: s.date, sets, notes: sets[0]?.notes || '' };
+      })
+      .filter(Boolean);
+  };
+
+  const handleSaveExercise = async (data) => {
+    if (!openExerciseId) return;
+    const ex = findExercise(openExerciseId);
+    setTodayDraft(prev => ({ ...prev, [openExerciseId]: data }));
+
+    // Build full payload of today's session
+    const allEntries = { ...todayDraft, [openExerciseId]: data };
+    await onSaveExercise(trainingId, training.name, allEntries);
+  };
+
+  const openExercise = openExerciseId ? findExercise(openExerciseId) : null;
+
+  return (
+    <div style={{ padding: '20px 20px 100px' }}>
+      <Header onBack={onBack} subtitle={training.name} title={training.focus} />
+
+      {syncing && (
+        <div style={{ background: '#0a1a2a', border: '1px solid #1f3f5f', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#9bcdf5', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="spinner"></span> Ukladám do Sheetu…
+        </div>
+      )}
+
+      {training.blocks.map((block, bIdx) => (
+        <div key={bIdx} style={{ marginBottom: 26 }}>
+          <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>{block.label}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {block.exercises.map(ex => {
+              const current = getCurrent(ex.id);
+              const lastHistory = getHistory(ex.id)[0];
+              const doneToday = !!current && current.sets && current.sets.length > 0;
+              return (
+                <button key={ex.id} onClick={() => setOpenExerciseId(ex.id)}
+                  style={{
+                    background: doneToday ? C.successBg : C.card,
+                    border: `1px solid ${doneToday ? C.successBorder : C.border}`,
+                    borderRadius: 12, padding: '14px 16px', textAlign: 'left',
+                    cursor: 'pointer', color: C.text, width: '100%',
+                  }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, color: C.mutedDim, marginBottom: 3 }}>{ex.id}</div>
+                      <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 3, lineHeight: 1.3 }}>{ex.name}</div>
+                      <div style={{ fontSize: 12, color: C.muted }}>{ex.target}{ex.weight ? ` · ${ex.weight}` : ''}</div>
+                    </div>
+                    {doneToday && <div style={{ color: C.success, fontSize: 18, lineHeight: 1, marginTop: 2 }}>✓</div>}
+                  </div>
+                  {lastHistory && !doneToday && (
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}`, fontSize: 12, color: C.mutedDim }}>
+                      Minule: {lastHistory.sets.map((s, i) => (
+                        <span key={i} style={{ color: '#aaa' }}>{s.weight ? `${s.weight}×${s.reps || '?'}` : `${s.reps || '?'}`}{i < lastHistory.sets.length - 1 ? ', ' : ''}</span>
+                      ))}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      {openExercise && (
+        <ExerciseDetail
+          exercise={openExercise}
+          onClose={() => setOpenExerciseId(null)}
+          history={getHistory(openExercise.id)}
+          currentEntry={getCurrent(openExercise.id)}
+          onSave={handleSaveExercise}
+        />
+      )}
+    </div>
+  );
+}
+
+function MiniChart({ data, height = 80, color = '#fff' }) {
+  if (!data || data.length < 2) {
+    return <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.mutedDim, fontSize: 11 }}>Potrebujem aspoň 2 záznamy</div>;
+  }
+  const w = 280, h = height;
+  const values = data.map(d => d.value);
+  const min = Math.min(...values), max = Math.max(...values), range = max - min || 1;
+  const step = w / (data.length - 1);
+  const points = data.map((d, i) => `${i * step},${h - 10 - ((d.value - min) / range) * (h - 20)}`).join(' ');
+  const last = values[values.length - 1], prev = values[values.length - 2], diff = last - prev;
+  const trendColor = diff > 0 ? C.success : diff < 0 ? '#b85f5f' : C.muted;
+  const trendSym = diff > 0 ? '↑' : diff < 0 ? '↓' : '→';
+  return (
+    <div>
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height }}>
+        <polyline fill="none" stroke={color} strokeWidth="1.5" points={points} />
+        {data.map((d, i) => <circle key={i} cx={i * step} cy={h - 10 - ((d.value - min) / range) * (h - 20)} r="2.5" fill={color} />)}
+      </svg>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: C.mutedDim, marginTop: 4 }}>
+        <span>{data.length} tréningov · max {max}, min {min}</span>
+        <span style={{ color: trendColor }}>{trendSym} {Math.abs(diff).toFixed(1)}</span>
+      </div>
+    </div>
+  );
+}
+
+function ProgressScreen({ onBack, sessions }) {
+  const stats = useMemo(() => {
+    const trackedIds = ALL_EXERCISES.filter(e => e.tracked).map(e => e.id);
+    return trackedIds.map(exId => {
+      const ex = findExercise(exId);
+      // Each session: collect sets for this exercise
+      const points = [];
+      [...sessions].reverse().forEach(s => {
+        const sets = s.sets.filter(set => set.exerciseId === exId);
+        if (!sets.length) return;
+        const top = Math.max(...sets.map(set => Number(set.weight) || 0));
+        const vol = sets.reduce((sum, set) => sum + (Number(set.weight) || 0) * (Number(set.reps) || 0), 0);
+        points.push({ date: s.date, top, vol, notes: sets[0]?.notes || '' });
+      });
+      if (!points.length) return null;
+      const seriesTop = points.filter(p => p.top > 0).map(p => ({ date: p.date, value: p.top }));
+      const seriesVol = points.filter(p => p.vol > 0).map(p => ({ date: p.date, value: Math.round(p.vol) }));
+      let signal = 'flat';
+      if (seriesTop.length >= 3) {
+        const last = seriesTop[seriesTop.length - 1].value;
+        const prev2 = seriesTop.slice(-3, -1);
+        const prevAvg = prev2.reduce((s, p) => s + p.value, 0) / prev2.length;
+        if (last > prevAvg * 1.02) signal = 'up'; else if (last < prevAvg * 0.98) signal = 'down';
+      } else if (seriesTop.length === 2) {
+        if (seriesTop[1].value > seriesTop[0].value) signal = 'up';
+        else if (seriesTop[1].value < seriesTop[0].value) signal = 'down';
+      }
+      return { exercise: ex, count: points.length, seriesTop, seriesVol, signal, latest: points[points.length - 1] };
+    }).filter(Boolean);
+  }, [sessions]);
+
+  const upTrend = stats.filter(s => s.signal === 'up');
+  const downTrend = stats.filter(s => s.signal === 'down');
+  const [expandedId, setExpandedId] = useState(null);
+
+  if (!sessions.length) {
+    return (
+      <div style={{ padding: '20px 20px 100px' }}>
+        <Header onBack={onBack} subtitle="Progres" title="Analýza & grafy" />
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20, color: C.muted, fontSize: 14, lineHeight: 1.6 }}>
+          Po prvom odcvičenom tréningu tu uvidíš trendy.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '20px 20px 100px' }}>
+      <Header onBack={onBack} subtitle="Progres" title="Analýza & grafy" />
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>Tréningov</div>
+          <div style={{ fontSize: 26, fontFamily: C.serif }}>{sessions.length}</div>
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>Cvikov v hre</div>
+          <div style={{ fontSize: 26, fontFamily: C.serif }}>{stats.length}</div>
+        </div>
+      </div>
+
+      {(upTrend.length > 0 || downTrend.length > 0) && (
+        <div style={{ marginBottom: 24 }}>
+          {upTrend.length > 0 && (
+            <div style={{ background: C.successBg, border: `1px solid ${C.successBorder}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: C.success, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>↑ Ide hore ({upTrend.length})</div>
+              <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.5 }}>{upTrend.map(s => s.exercise.name).join(', ')}</div>
+            </div>
+          )}
+          {downTrend.length > 0 && (
+            <div style={{ background: '#1a0a0a', border: '1px solid #3f1f1f', borderRadius: 12, padding: 14 }}>
+              <div style={{ fontSize: 11, color: '#b85f5f', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 6 }}>↓ Stagnuje alebo klesá ({downTrend.length})</div>
+              <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.5 }}>{downTrend.map(s => s.exercise.name).join(', ')}</div>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 8, fontStyle: 'italic' }}>Tu sa oplatí pozrieť — únava? technika? regenerácia?</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Detail cvikov</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {stats.map(s => {
+          const isOpen = expandedId === s.exercise.id;
+          const trendColor = s.signal === 'up' ? C.success : s.signal === 'down' ? '#b85f5f' : C.muted;
+          const trendSym = s.signal === 'up' ? '↑' : s.signal === 'down' ? '↓' : '→';
+          const lastTop = s.seriesTop.length ? s.seriesTop[s.seriesTop.length - 1].value : 0;
+          return (
+            <div key={s.exercise.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
+              <button onClick={() => setExpandedId(isOpen ? null : s.exercise.id)}
+                style={{ width: '100%', background: 'transparent', border: 'none', padding: '14px 16px', textAlign: 'left', cursor: 'pointer', color: C.text }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, color: C.mutedDim, marginBottom: 3 }}>{s.exercise.id}</div>
+                    <div style={{ fontSize: 14, fontWeight: 500, lineHeight: 1.3 }}>{s.exercise.name}</div>
+                    <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{s.count}× · top {lastTop > 0 ? `${lastTop} kg` : '—'}</div>
+                  </div>
+                  <div style={{ color: trendColor, fontSize: 18, marginLeft: 10 }}>{trendSym}</div>
+                </div>
+              </button>
+              {isOpen && (
+                <div style={{ padding: '4px 16px 16px', borderTop: `1px solid ${C.border}` }}>
+                  <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.1em', textTransform: 'uppercase', margin: '12px 0 6px' }}>Top váha série</div>
+                  <MiniChart data={s.seriesTop} color="#fff" />
+                  <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.1em', textTransform: 'uppercase', margin: '14px 0 6px' }}>Celkový objem (kg × reps)</div>
+                  <MiniChart data={s.seriesVol} color="#888" />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function HistoryScreen({ onBack, sessions }) {
+  return (
+    <div style={{ padding: '20px 20px 100px' }}>
+      <Header onBack={onBack} subtitle="História" title={`${sessions.length} tréningov`} />
+      {!sessions.length && <div style={{ color: C.muted, fontSize: 14 }}>Zatiaľ nič odcvičené.</div>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {sessions.map((s, i) => {
+          const exCount = new Set(s.sets.map(set => set.exerciseId)).size;
+          return (
+            <div key={i} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div style={{ fontSize: 11, color: C.mutedDim, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 3 }}>{s.training}</div>
+                  <div style={{ fontSize: 15, fontWeight: 500 }}>{new Date(s.date).toLocaleDateString('sk-SK', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, textAlign: 'right' }}>{exCount} cvikov<br/>{s.sets.length} sérií</div>
+              </div>
+              {s.notes && <div style={{ marginTop: 8, fontSize: 12, color: C.muted, fontStyle: 'italic' }}>"{s.notes}"</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SettingsScreen({ onBack, onRefresh, onResetUrl }) {
+  return (
+    <div style={{ padding: '20px 20px 100px' }}>
+      <Header onBack={onBack} subtitle="Nastavenia" title="Konfigurácia" />
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: C.textDim, marginBottom: 12, lineHeight: 1.5 }}>Endpoint: <code style={{ fontSize: 11, color: '#aaa', wordBreak: 'break-all' }}>{getEndpoint() || '—'}</code></div>
+        <button onClick={onRefresh} style={{ width: '100%', background: '#1a1a1a', border: `1px solid ${C.borderStrong}`, borderRadius: 10, padding: '12px', color: C.text, cursor: 'pointer', fontSize: 14, marginBottom: 8 }}>Obnoviť dáta zo Sheetu</button>
+        <button onClick={onResetUrl} style={{ width: '100%', background: 'transparent', border: '1px solid #3f1f1f', borderRadius: 10, padding: '12px', color: '#b85f5f', cursor: 'pointer', fontSize: 14 }}>Zmeniť endpoint URL</button>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================
+// ROOT
+// =============================================================
+function App() {
+  const [view, setView] = useState({ screen: 'home' });
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [hasEndpoint, setHasEndpoint] = useState(!!getEndpoint());
+
+  const refresh = useCallback(async () => {
+    if (!getEndpoint()) return;
+    setLoading(true); setError('');
+    try {
+      const data = await apiReadHistory();
+      setSessions(data.sessions || []);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { if (hasEndpoint) refresh(); }, [hasEndpoint, refresh]);
+
+  const handleSaveExercise = async (trainingId, trainingName, allEntries) => {
+    setSyncing(true);
+
+    // Build flat sets array
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const todayStr = new Date().toDateString();
+    const existing = sessions.find(s => s.training === trainingName && new Date(s.date).toDateString() === todayStr);
+    const sessionId = existing?.sessionId || `SES-${Date.now()}`;
+
+    const setsArr = [];
+    Object.entries(allEntries).forEach(([exId, entry]) => {
+      const ex = findExercise(exId);
+      entry.sets.forEach((s, idx) => {
+        setsArr.push({
+          exerciseId: exId,
+          exerciseName: ex?.name || '',
+          setNum: idx + 1,
+          weight: s.weight === '' ? null : Number(s.weight),
+          reps: s.reps === '' ? null : Number(s.reps),
+          notes: entry.notes || '',
+        });
+      });
+    });
+
+    const payload = {
+      sessionId,
+      date: todayDate,
+      trainingId,
+      trainingName,
+      duration: null,
+      notes: '',
+      sets: setsArr,
+    };
+
+    try {
+      await apiWriteSession(payload);
+      // Update local state optimistically
+      const newSession = {
+        sessionId,
+        date: new Date().toISOString(),
+        training: trainingName,
+        duration: null,
+        notes: '',
+        sets: setsArr,
+      };
+      setSessions(prev => {
+        const filtered = prev.filter(s => s.sessionId !== sessionId);
+        return [newSession, ...filtered].sort((a, b) => new Date(b.date) - new Date(a.date));
+      });
+    } catch (e) {
+      setError('Ukladanie zlyhalo: ' + e.message);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  if (!hasEndpoint) {
+    return (
+      <div style={{ minHeight: '100vh', background: C.bg, color: C.text, maxWidth: 600, margin: '0 auto' }}>
+        <SetupScreen onSaved={() => setHasEndpoint(true)} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.text, maxWidth: 600, margin: '0 auto' }}>
+      {view.screen === 'home' && <HomeScreen onNav={setView} sessions={sessions} loading={loading} error={error} onRefresh={refresh} />}
+      {view.screen === 'training' && (
+        <TrainingScreen trainingId={view.trainingId} onBack={() => setView({ screen: 'home' })}
+          sessions={sessions} onSaveExercise={handleSaveExercise} syncing={syncing} />
+      )}
+      {view.screen === 'progress' && <ProgressScreen onBack={() => setView({ screen: 'home' })} sessions={sessions} />}
+      {view.screen === 'history' && <HistoryScreen onBack={() => setView({ screen: 'home' })} sessions={sessions} />}
+      {view.screen === 'settings' && (
+        <SettingsScreen onBack={() => setView({ screen: 'home' })} onRefresh={refresh}
+          onResetUrl={() => { localStorage.removeItem(URL_KEY); setHasEndpoint(false); }} />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
