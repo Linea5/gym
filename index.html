@@ -40,7 +40,7 @@ const getEndpoint = () => localStorage.getItem(URL_KEY) || '';
 const setEndpoint = (url) => localStorage.setItem(URL_KEY, url);
 
 // =============================================================
-// API — talks to Apps Script via hidden iframe (bypasses CORB)
+// API — talks to Apps Script via hidden iframe + postMessage
 // =============================================================
 async function apiReadHistory() {
   const url = getEndpoint();
@@ -57,19 +57,23 @@ async function apiReadHistory() {
       reject(new Error('Timeout — Sheet neodpovedá. Skontroluj endpoint URL.'));
     }, 20000);
 
-    function cleanup() {
-      clearTimeout(timeout);
-      try { delete window[cbName]; } catch (e) {}
-      if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
-    }
-
-    window[cbName] = (data) => {
+    function onMessage(event) {
+      if (!event.data || event.data.gymCallback !== cbName) return;
       if (settled) return;
       settled = true;
+      const data = event.data.data;
       cleanup();
       if (data && data.error) reject(new Error(data.error));
       else resolve(data);
-    };
+    }
+
+    function cleanup() {
+      clearTimeout(timeout);
+      window.removeEventListener('message', onMessage);
+      if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    }
+
+    window.addEventListener('message', onMessage);
 
     const iframe = document.createElement('iframe');
     iframe.style.display = 'none';
