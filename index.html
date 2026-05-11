@@ -82,7 +82,7 @@ const EXERCISE_MACHINES = {
 
 
 
-const { useState, useEffect, useMemo, useCallback } = React;
+const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
 // =============================================================
 // CONFIG — store Apps Script URL in localStorage
@@ -1215,14 +1215,24 @@ function App() {
 
   useEffect(() => { if (hasEndpoint) refresh(); }, [hasEndpoint, refresh]);
 
+  // Lock for today's sessionId per training — prevents race condition where rapid saves create duplicate sessions
+  const todaySessionIdRef = useRef({});
+
   const handleSaveExercise = async (trainingId, trainingName, allEntries, customExercises) => {
     setSyncing(true);
 
     // Build flat sets array
     const todayDate = new Date().toISOString().slice(0, 10);
     const todayStr = new Date().toDateString();
-    const existing = sessions.find(s => s.training === trainingName && new Date(s.date).toDateString() === todayStr);
-    const sessionId = existing?.sessionId || `SES-${Date.now()}`;
+    const lockKey = trainingName + '|' + todayStr;
+
+    // 1) check lock (set immediately on prior save), 2) check sessions, 3) create new
+    let sessionId = todaySessionIdRef.current[lockKey];
+    if (!sessionId) {
+      const existing = sessions.find(s => s.training === trainingName && new Date(s.date).toDateString() === todayStr);
+      sessionId = existing?.sessionId || `SES-${Date.now()}`;
+      todaySessionIdRef.current[lockKey] = sessionId; // lock immediately, before any await
+    }
 
     const setsArr = [];
     Object.entries(allEntries).forEach(([exId, entry]) => {
